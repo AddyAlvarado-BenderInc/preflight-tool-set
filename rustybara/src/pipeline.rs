@@ -237,13 +237,16 @@ impl PdfPipeline {
             "libpdfium.so" // Linux
         };
 
-        let pdfium = Pdfium::new(
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|p| p.join(dylib_name)))
-                .and_then(|lib| Pdfium::bind_to_library(lib).ok())
-                .map_or_else(|| Pdfium::bind_to_system_library(), Ok)?,
-        );
+        let bindings_result = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join(dylib_name)))
+            .and_then(|lib| Pdfium::bind_to_library(lib).ok())
+            .map_or_else(|| Pdfium::bind_to_system_library(), Ok);
+
+        let pdfium = match bindings_result {
+            Ok(bindings) => Pdfium::new(bindings),
+            Err(_) => Pdfium::default(),
+        };
 
         let pdf_doc = pdfium.load_pdf_from_byte_vec(buf, None)?;
         let page = pdf_doc.pages().get(page_num as PdfPageIndex)?;

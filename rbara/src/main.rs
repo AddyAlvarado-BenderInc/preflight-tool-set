@@ -4,7 +4,7 @@ pub mod tui;
 
 use clap::Parser;
 use cli::{Cli, Command};
-use process::{output_path, run_image, run_resize, run_trim};
+use process::{run_image, run_resize, run_trim};
 
 fn main() {
     let cli = Cli::parse();
@@ -12,7 +12,16 @@ fn main() {
     match cli.command {
         Some(command) => run_command(command),
         None => {
-            println!("TUI not implemented yet");
+            let mut terminal = ratatui::init();
+            let mut app = tui::App::new();
+
+            while app.running {
+                terminal.draw(|frame| tui::ui::draw(frame, &app)).unwrap();
+                tui::events::handle_events(&mut app).unwrap();
+                app.tick();
+            }
+
+            ratatui::restore();
         }
     }
 }

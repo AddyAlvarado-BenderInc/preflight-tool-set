@@ -45,7 +45,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Image(e) => write!(f, "image error: {e}"),
-            Error::Io(e) => write!(f, "E/O error: {e}"),
+            Error::Io(e) => write!(f, "I/O error: {e}"),
             Error::Pdf(e) => write!(f, "PDF error: {e}"),
             Error::Render(e) => write!(f, "Render error: {e}"),
         }
