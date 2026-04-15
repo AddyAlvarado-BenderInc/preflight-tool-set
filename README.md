@@ -28,10 +28,14 @@ GPU-accelerated PDF page viewer (`rbv`).
 - **Resize to bleed** — Expand MediaBox (and CropBox) by a specified bleed margin
   to prepare files for print production.
 - **Export to image** — Rasterize PDF pages to JPEG, PNG, WebP, or TIFF at any DPI.
-- **Pipeline API** — Chain operations fluently: `open → trim → resize → save`.
+- **Remap CMYK colors** — Substitute specific CMYK values in PDF content streams with
+  tolerance-based matching.
+- **ICC color management** — Feature-gated (`color`) lcms2 integration for ICC profile
+  loading and color space transforms (RGB, CMYK, Gray).
+- **Pipeline API** — Chain operations fluently: `open → trim → resize → remap → save`.
 - **Batch processing** — Process entire directories of PDFs from CLI or TUI.
 - **Interactive TUI** — App-style terminal interface for designers who prefer guided
-  workflows over raw CLI flags.
+  workflows over raw CLI flags. Configurable output directory.
 - **Prepress vocabulary** — Every API surface speaks in boxes, bleeds, and DPI — not
   generic PDF primitives.
 
@@ -87,6 +91,9 @@ rbara resize --bleed 9.0 input.pdf
 
 # Export pages as 300 DPI PNGs
 rbara image --format png --dpi 300 input.pdf
+
+# Remap a CMYK color (rich black → 60/40/20/100)
+rbara remap-color --from 1.0 1.0 1.0 1.0 --to 0.6 0.4 0.2 1.0 input.pdf
 ```
 
 ### TUI
@@ -118,13 +125,15 @@ rustybara/src/
     boxes.rs      — PageBoxes: TrimBox, MediaBox, BleedBox, CropBox reader
   stream/
     filter.rs     — ContentFilter: CTM-walking content stream filter
+    color_ops.rs  — ColorRemap: CMYK→CMYK value substitution in content streams
   raster/
     render.rs     — PageRenderer trait, CpuRenderer (pdfium-render)
     config.rs     — RenderConfig (DPI, annotation toggles)
   encode/
     save.rs       — OutputFormat enum, image encoding (JPG/PNG/WebP/TIFF)
-  color/
-    icc.rs        — ICC profile color management (planned, feature-gated)
+  color/            (feature-gated: "color")
+    icc.rs        — ColorSpace, IccProfile (ICC profile loading + detection)
+    transform.rs  — ColorTransform, RenderingIntent (lcms2 bridge)
 ```
 
 ### Public API
@@ -137,6 +146,7 @@ prepress vocabulary:
 PdfPipeline::open(path)?
     .trim()?                    // Remove content outside TrimBox
     .resize(bleed_pts)?         // Expand page boxes by bleed margin
+    .remap_color(from, to, tolerance)?  // Substitute CMYK values
     .save_pdf(path)?;           // Write the result
 
 // Rasterization
@@ -173,6 +183,7 @@ pub struct CpuRenderer;   // pdfium-render — ships today
 | [`pdfium-render`](https://docs.rs/pdfium-render) 0.9 | PDF rasterization via PDFium |
 | [`image`](https://docs.rs/image) 0.25 | Bitmap encoding (JPEG, PNG, WebP, TIFF) |
 | [`rayon`](https://docs.rs/rayon) 1.11 | Parallel page rendering |
+| [`lcms2`](https://docs.rs/lcms2) 6.1 | ICC color management (optional, `color` feature) |
 
 ### Runtime Requirement — PDFium
 
@@ -204,12 +215,14 @@ flag-based CLI for scripting and a TUI for guided workflows.
 | `↑` / `↓` | Navigate menu |
 | `Enter` | Select / confirm |
 | `Esc` | Back / quit |
-| `m` | Trim print marks |
+| `t` | Trim print marks |
 | `r` | Resize to bleed |
 | `x` | Export to image |
+| `m` | Remap colors |
 | `p` | Preview page |
 | `o` | Toggle overwrite mode |
-| `c` | Change files |
+| `/` | Output path |
+| `f` | Change files |
 | `q` | Quit |
 | `?` | Keyboard reference overlay |
 
@@ -242,7 +255,7 @@ rbv <file_path> <page_index> [--dpi <n>]
 
 | Limitation | Notes |
 |---|---|
-| sRGB output only | CMYK→sRGB via PDFium. ICC-accurate output planned for v1.x (`color` feature). |
+| sRGB rasterization only | CMYK→sRGB via PDFium. ICC color transforms available via `color` feature for stream-level operations. |
 | JPEG quality not configurable | Fixed encoder quality. `--quality` flag planned. |
 | Spot color approximation | PDFium renders spot inks as CMYK approximations. |
 | No Form XObject ColorSpace pruning | Inherited limitation from content stream filtering. |
@@ -252,7 +265,10 @@ rbv <file_path> <page_index> [--dpi <n>]
 
 ## Roadmap
 
-- [ ] ICC color management (`color` module via `lcms2`)
+- [x] ICC color management (`color` module via `lcms2`) — v0.1.2
+- [x] CMYK→CMYK color remapping in content streams — v0.1.2
+- [ ] RGB→CMYK conversion (vector graphics + embedded images)
+- [ ] Spot color detection service
 - [ ] `rbv` GPU-accelerated page viewer
 - [ ] PDF/X validation and preflight reports
 - [ ] Configurable JPEG quality (`--quality` flag)
