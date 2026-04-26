@@ -41,20 +41,27 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 }
 fn draw_main(frame: &mut Frame, app: &App) {
-    let chunks = Layout::vertical([
+    let outer = Layout::vertical([
         Constraint::Length(3), // title
-        Constraint::Min(0),    // menu
+        Constraint::Min(0),    // content
         Constraint::Length(1), // status
         Constraint::Length(1), // footer
     ])
     .split(frame.area());
 
+    let columns = Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
+        .split(outer[1]);
+
+    let right_halves = Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(columns[1]);
+
+    let right_bottom =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(5)]).split(right_halves[1]);
+
     let title = Paragraph::new(" Rustybara — Prepress Toolkit")
         .style(Style::default().fg(AppColor::PrimaryOrange.into()).bold())
         .block(Block::default().borders(Borders::BOTTOM));
-    frame.render_widget(title, chunks[0]);
-
-    // let logo = SomeRatatuiStruct
+    frame.render_widget(title, outer[0]);
 
     let items: Vec<ListItem> = MenuAction::ALL
         .iter()
@@ -72,7 +79,11 @@ fn draw_main(frame: &mut Frame, app: &App) {
         })
         .collect();
     let menu = List::new(items).block(Block::default().padding(Padding::top(1)));
-    frame.render_widget(menu, chunks[1]);
+    frame.render_widget(menu, columns[0]);
+
+    draw_ascii_icon(frame, app, right_halves[0]);
+    draw_inspection_table(frame, app, right_bottom[0]);
+    draw_action_log(frame, app, right_bottom[1]);
 
     let overwrite_tag = if app.overwrite { " [OVERWRITE] " } else { "" };
     let status_text = if app.file_paths.is_empty() {
@@ -82,16 +93,126 @@ fn draw_main(frame: &mut Frame, app: &App) {
     } else {
         format!(" {} files loaded{overwrite_tag}", app.file_paths.len())
     };
-    let status =
-        Paragraph::new(status_text).style(Style::default().fg(AppColor::PrimaryOrange.into()));
-    frame.render_widget(status, chunks[2]);
+    frame.render_widget(
+        Paragraph::new(status_text).style(Style::default().fg(AppColor::PrimaryOrange.into())),
+        outer[2],
+    );
+
     let footer_parts: Vec<String> = MenuAction::ALL
         .iter()
         .filter_map(|a| a.hotkey().map(|k| format!("[{k}]{}", &a.label()[1..])))
         .collect();
-    let footer_text = format!(" {} [?]help", footer_parts.join(" "));
-    let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(footer, chunks[3]);
+    frame.render_widget(
+        Paragraph::new(format!(" {} [?]help", footer_parts.join(" ")))
+            .style(Style::default().fg(Color::DarkGray)),
+        outer[3],
+    );
+}
+fn draw_ascii_icon(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::tui::app::SingleAsciiIconState;
+    use crate::tui::ascii_icon::icon_lines;
+
+    let state = if !app.last_result_ok && matches!(app.screen, Screen::Result) {
+        SingleAsciiIconState::FailedToLoad
+    } else {
+        app.ascii_icon_state()
+    };
+
+    let subtitle = format!(
+        r#" {} {} "#,
+        app.file_paths.len(),
+        if app.file_paths.len() == 1 {
+            "file"
+        } else {
+            "files"
+        }
+    );
+
+    let lines = icon_lines(&state, &subtitle);
+    let text = lines.join("\n");
+
+    let icon = Paragraph::new(text)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(AppColor::PrimaryOrange.into()))
+        .block(Block::default());
+    frame.render_widget(icon, area);
+}
+fn draw_inspection_table(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::tui::app::ColorSpaceInfo;
+
+    let orange: Color = AppColor::PrimaryOrange.into();
+    let filled = Style::default().fg(Color::Black).bg(orange);
+
+    let fmt_box = |b: Option<[f32; 4]>| -> String {
+        b.map(|v| {
+            format!(
+                "{:.2} x {:.2} in",
+                (v[2] - v[0]) / 72.0,
+                (v[3] - v[1]) / 72.0
+            )
+        })
+        .unwrap_or_else(|| "—".into())
+    };
+
+    let rows: Vec<Row> = if let Some(m) = &app.pdf_metadata {
+        let color_label = match &m.color_space {
+            ColorSpaceInfo::PureCMYK => "Pure CMYK",
+            ColorSpaceInfo::PureRGB => "Pure RGB",
+            ColorSpaceInfo::Mixed => "Mixed",
+            ColorSpaceInfo::CPPE => "CPPE",
+            ColorSpaceInfo::Unknown => "Unknown",
+        };
+        let plain = Style::default();
+        vec![
+            Row::new(vec!["TrimBox".to_string(), fmt_box(m.trimbox)]).style(filled),
+            Row::new(vec!["MediaBox".to_string(), fmt_box(Some(m.mediabox))]).style(plain),
+            Row::new(vec!["BleedBox".to_string(), fmt_box(m.bleedbox)]).style(filled),
+            Row::new(vec!["Bleed".to_string(), format!("{:.3} in", m.bleed_pts / 72.0)]).style(plain),
+            Row::new(vec!["Color".to_string(), color_label.to_string()]).style(filled),
+            Row::new(vec!["Pages".to_string(), m.page_count.to_string()]).style(plain),
+            Row::new(vec!["File Size".to_string(), format!("{} KB", m.file_size_kb)]).style(filled),
+            Row::new(vec!["Editing".to_string(), m.editing.clone()]).style(plain),
+        ]
+    } else {
+        vec![Row::new(vec!["No metadata".to_string(), "—".to_string()])]
+    };
+
+    let table = Table::new(rows, [Constraint::Length(12), Constraint::Min(0)])
+        .block(Block::default().borders(Borders::TOP));
+    frame.render_widget(table, area);
+}
+fn draw_action_log(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::tui::app::LogStatus;
+
+    let lines: Vec<String> = app
+        .action_log
+        .iter()
+        .rev()
+        .take(3)
+        .map(|e| {
+            let tag = match &e.status {
+                LogStatus::Ok => "OK  ",
+                LogStatus::Failed => "FAIL",
+                LogStatus::Partial => "PART",
+            };
+            format!(" [{}] {}  {}", e.timestamp, tag, e.action)
+        })
+        .collect();
+
+    let text = if lines.is_empty() {
+        format!("{}", app.idle_quip.to_string())
+    } else {
+        lines.join("\n")
+    };
+
+    let log = Paragraph::new(text)
+        .style(Style::default().fg(Color::DarkGray))
+        .block(
+            Block::default()
+                .borders(Borders::TOP)
+                .title(" Last Actions "),
+        );
+    frame.render_widget(log, area);
 }
 fn draw_file_select(frame: &mut Frame, app: &App) {
     let chunks = Layout::vertical([

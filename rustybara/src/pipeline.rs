@@ -27,6 +27,10 @@ pub struct PdfPipeline {
 }
 
 impl PdfPipeline {
+    pub fn doc(&self) -> &Document {
+        &self.doc
+    }
+
     /// Opens a document from the specified file path.
     ///
     /// This function attempts to load a document from the given path and wraps it

@@ -30,6 +30,13 @@ pub struct ColorRemap {
     pub tolerance: f64,
 }
 
+pub enum ColorSpaceKind {
+    PureCMYK,
+    PureRGB,
+    Mixed,
+    Unknown,
+}
+
 impl ColorRemap {
     /// Applies color remappings to all pages in a PDF document.
     ///
@@ -136,4 +143,31 @@ fn cmyk_matches(a: &[f64; 4], b: &[f64; 4], tolerance: f64) -> bool {
 
 fn cmyk_to_operands(cmyk: &[f64; 4]) -> Vec<Object> {
     cmyk.iter().map(|&v| Object::Real(v as f32)).collect()
+}
+
+pub fn detect_color_space(doc: &Document) -> ColorSpaceKind {
+    let mut has_cmyk = false;
+    let mut has_rgb = false;
+
+    for &page_id in doc.get_pages().values() {
+        let Ok(content) = doc.get_and_decode_page_content(page_id) else {
+            continue;
+        };
+        for op in &content.operations {
+            match op.operator.as_str() {
+                "k" | "K" => has_cmyk = true,
+                "rg" | "RG" => has_rgb = true,
+                _ => {}
+            }
+            if has_cmyk && has_rgb {
+                return ColorSpaceKind::Mixed;
+            }
+        }
+    }
+
+    match (has_cmyk, has_rgb) {
+        (true, false) => ColorSpaceKind::PureCMYK,
+        (false, true) => ColorSpaceKind::PureRGB,
+        _ => ColorSpaceKind::Unknown,
+    }
 }

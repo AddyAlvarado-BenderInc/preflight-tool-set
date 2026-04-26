@@ -68,12 +68,17 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                                 .collect();
                             if app.file_paths.is_empty() {
                                 app.status_message =
-                                    Some(format!("No PDF files found in directory").into());
+                                    Some(format!("No PDF files found in directory").to_string());
                             } else {
                                 let count = app.file_paths.len();
                                 app.status_message = Some(format!("{count} file(s) loaded"));
                                 app.input_buffer.clear();
                                 app.navigate(Screen::Main);
+                                if let Some(path) = app.file_paths.first() {
+                                    if let Ok(meta) = crate::process::load_metadata(path) {
+                                        app.pdf_metadata = Some(meta);
+                                    }
+                                }
                             }
                         } else if !path.exists() {
                             app.status_message =
@@ -87,6 +92,11 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                             app.status_message = Some("1 file(s) loaded".into());
                             app.input_buffer.clear();
                             app.navigate(Screen::Main);
+                            if let Some(path) = app.file_paths.first() {
+                                if let Ok(meta) = crate::process::load_metadata(path) {
+                                    app.pdf_metadata = Some(meta);
+                                }
+                            }
                         } else {
                             app.status_message = Some("Not a PDF file".into());
                         }

@@ -1,5 +1,8 @@
-use crate::tui::App;
+use crate::tui::app::App;
+use crate::tui::app::ColorSpaceInfo;
 use crate::tui::app::MenuAction;
+use core::f64;
+use rustybara::pages::PageBoxes;
 use rustybara::PdfPipeline;
 use std::path::{Path, PathBuf};
 
@@ -111,6 +114,62 @@ pub fn run_image(
         }
     }
     Ok(())
+}
+
+pub fn load_metadata(path: &Path) -> rustybara::Result<crate::tui::app::PdfMetadata> {
+    use crate::tui::app::PdfMetadata;
+    use rustybara::{
+        stream::{detect_color_space, ColorSpaceKind},
+        PdfPipeline,
+    };
+
+    let pipeline = PdfPipeline::open(path)?;
+    let doc = pipeline.doc();
+    let pages = doc.get_pages();
+
+    let first_id = match pages.values().next() {
+        Some(&id) => id,
+        None => {
+            return Err(rustybara::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "PDF has no pages",
+            )))
+        }
+    };
+    let boxes = PageBoxes::read(doc, first_id)?;
+
+    let rect_to_arr = |r: &rustybara::geometry::Rect| -> [f32; 4] {
+        [r.x as f32, r.y as f32, r.right() as f32, r.top() as f32]
+    };
+
+    let trimbox = boxes.trim_box.as_ref().map(rect_to_arr);
+    let mediabox = rect_to_arr(&boxes.media_box);
+    let bleedbox = boxes.bleed_box.as_ref().map(rect_to_arr);
+
+    let bleed_pts = match &boxes.trim_box {
+        Some(trim) => (trim.x - boxes.media_box.x).abs() as f32,
+        None => 0.0,
+    };
+
+    let color_space = match detect_color_space(pipeline.doc()) {
+        ColorSpaceKind::PureCMYK => ColorSpaceInfo::PureCMYK,
+        ColorSpaceKind::PureRGB => ColorSpaceInfo::PureRGB,
+        ColorSpaceKind::Mixed => ColorSpaceInfo::Mixed,
+        ColorSpaceKind::Unknown => ColorSpaceInfo::Unknown,
+    };
+
+    let file_size_kb = std::fs::metadata(path).map(|m| m.len() / 1024).unwrap_or(0);
+
+    Ok(PdfMetadata {
+        trimbox,
+        mediabox,
+        bleedbox,
+        bleed_pts,
+        color_space,
+        page_count: pipeline.page_count() as u32,
+        file_size_kb,
+        editing: String::new(),
+    })
 }
 
 pub fn run_tui_action(app: &App) -> rustybara::Result<(String, Vec<PathBuf>)> {

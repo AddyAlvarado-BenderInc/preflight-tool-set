@@ -22,10 +22,86 @@ pub enum Screen {
     Processing,
     Result,
 }
+
 pub enum OutputChoice {
     Same,
     New,
 }
+
+pub enum SingleAsciiIconState {
+    NoTrimBox,
+    TrimBoxPresent,
+    InvalidPdf,
+    PureCMYK,
+    PureRGB,
+    Loading,
+    ResizingToBleed,
+    ExportImages,
+    DeleteTrimMarks,
+    FailedToLoad,
+}
+
+pub enum BatchAsciiIconState {
+    NoTrimBox,
+    TrimBoxPresent,
+    InvalidPdf,
+    PureCMYK,
+    PureRGB,
+    // Loading, NOTE: this could be handled as a single icon since this indexes individually.
+    // Deferring for now.
+    ResizingToBleed,
+    ExportImages,
+    DeleteTrimMarks,
+    // FailedToLoad, NOTE: similarly to the Loading enum value, single icon could handle this.
+    // Deferring for now.
+}
+
+pub struct PdfMetadata {
+    pub trimbox: Option<[f32; 4]>,
+    pub mediabox: [f32; 4],
+    pub bleedbox: Option<[f32; 4]>,
+    pub bleed_pts: f32,
+    pub color_space: ColorSpaceInfo,
+    pub page_count: u32,
+    pub file_size_kb: u64,
+    pub editing: String, // current editing state label
+}
+
+impl Default for PdfMetadata {
+    fn default() -> Self {
+        Self {
+            trimbox: None,
+            mediabox: [0.0, 0.0, 0.0, 0.0],
+            bleedbox: None,
+            bleed_pts: 9.0,
+            color_space: ColorSpaceInfo::Unknown,
+            page_count: 0,
+            file_size_kb: 0,
+            editing: String::new(),
+        }
+    }
+}
+
+pub enum ColorSpaceInfo {
+    PureCMYK,
+    PureRGB,
+    Mixed,
+    CPPE,
+    Unknown,
+}
+
+pub enum LogStatus {
+    Ok,
+    Failed,
+    Partial,
+}
+
+pub struct ActionLogEntry {
+    pub timestamp: String,
+    pub action: String,
+    pub status: LogStatus,
+}
+
 impl MenuAction {
     pub const ALL: &[MenuAction] = &[
         Self::TrimMarks,
@@ -74,6 +150,7 @@ impl MenuAction {
         )
     }
 }
+
 pub struct ActionParams {
     pub bleed_pts: f64,
     pub export_format: String,
@@ -111,6 +188,10 @@ pub struct App {
     pub input_buffer: String,
     pub result_message: String,
     pub last_result_ok: bool,
+    pub pdf_metadata: Option<PdfMetadata>,
+    pub action_log: Vec<ActionLogEntry>,
+    pub preview_page: usize,
+    pub idle_quip: String,
 }
 
 impl Default for App {
@@ -136,6 +217,10 @@ impl App {
             input_buffer: String::new(),
             result_message: String::new(),
             last_result_ok: false,
+            pdf_metadata: Some(PdfMetadata::default()),
+            action_log: Vec::new(),
+            preview_page: 0,
+            idle_quip: crate::tui::quips::random_quip(),
         }
     }
     pub fn tick(&mut self) {
@@ -153,6 +238,20 @@ impl App {
     pub fn menu_up(&mut self) {
         if self.menu_index > 0 {
             self.menu_index -= 1;
+        }
+    }
+    pub fn ascii_icon_state(&self) -> SingleAsciiIconState {
+        if matches!(self.screen, Screen::Processing) {
+            return SingleAsciiIconState::Loading;
+        }
+        match &self.pdf_metadata {
+            None => SingleAsciiIconState::NoTrimBox,
+            Some(m) if m.trimbox.is_none() => SingleAsciiIconState::NoTrimBox,
+            Some(m) => match &m.color_space {
+                ColorSpaceInfo::PureRGB => SingleAsciiIconState::PureRGB,
+                ColorSpaceInfo::PureCMYK => SingleAsciiIconState::PureCMYK,
+                _ => SingleAsciiIconState::TrimBoxPresent,
+            },
         }
     }
     pub fn menu_down(&mut self) {
@@ -237,6 +336,11 @@ impl App {
                 if !new_paths.is_empty() {
                     self.file_paths = new_paths;
                 }
+                if let Some(path) = self.file_paths.first() {
+                    if let Ok(meta) = crate::process::load_metadata(path) {
+                        self.pdf_metadata = Some(meta);
+                    }
+                }
             }
             Err(e) => {
                 self.result_message = friendly_error(e);
@@ -265,6 +369,5 @@ fn friendly_error(e: rustybara::Error) -> String {
         ),
         rustybara::Error::Image(_) => format!("Image encoding failed: {e}"),
         rustybara::Error::Color(_) => format!("Color conversion failed: {e}"),
-        _ => format!("Unknown error: {e}"),
     }
 }
