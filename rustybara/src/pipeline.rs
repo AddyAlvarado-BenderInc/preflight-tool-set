@@ -1,3 +1,4 @@
+use crate::color::icc::ColorSpaceKind;
 use crate::encode::OutputFormat;
 use crate::pages::PageBoxes;
 use crate::raster::RenderConfig;
@@ -123,6 +124,33 @@ impl PdfPipeline {
             }
         }
         Ok(self)
+    }
+
+    pub fn detect_color_space(doc: &Document) -> ColorSpaceKind {
+        let mut has_cmyk = false;
+        let mut has_rgb = false;
+
+        for &page_id in doc.get_pages().values() {
+            let Ok(content) = doc.get_and_decode_page_content(page_id) else {
+                continue;
+            };
+            for op in &content.operations {
+                match op.operator.as_str() {
+                    "k" | "K" => has_cmyk = true,
+                    "rg" | "RG" => has_rgb = true,
+                    _ => {}
+                }
+                if has_cmyk && has_rgb {
+                    return ColorSpaceKind::Mixed;
+                }
+            }
+        }
+
+        match (has_cmyk, has_rgb) {
+            (true, false) => ColorSpaceKind::PureCMYK,
+            (false, true) => ColorSpaceKind::PureRGB,
+            _ => ColorSpaceKind::Unknown,
+        }
     }
 
     pub fn remap_color(

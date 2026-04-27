@@ -54,6 +54,13 @@ pub enum ColorSpace {
     Rgb,
 }
 
+/// A version of ColorSpace but for the UI
+pub enum ColorSpaceKind {
+    PureCMYK,
+    PureRGB,
+    Mixed,
+    Unknown,
+}
 /// An ICC (International Color Consortium) profile representation.
 ///
 /// This structure encapsulates the raw ICC profile data and its associated color space information.

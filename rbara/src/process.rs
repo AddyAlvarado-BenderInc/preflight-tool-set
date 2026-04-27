@@ -118,10 +118,7 @@ pub fn run_image(
 
 pub fn load_metadata(path: &Path) -> rustybara::Result<crate::tui::app::PdfMetadata> {
     use crate::tui::app::PdfMetadata;
-    use rustybara::{
-        stream::{detect_color_space, ColorSpaceKind},
-        PdfPipeline,
-    };
+    use rustybara::PdfPipeline;
 
     let pipeline = PdfPipeline::open(path)?;
     let doc = pipeline.doc();
@@ -151,11 +148,11 @@ pub fn load_metadata(path: &Path) -> rustybara::Result<crate::tui::app::PdfMetad
         None => 0.0,
     };
 
-    let color_space = match detect_color_space(pipeline.doc()) {
-        ColorSpaceKind::PureCMYK => ColorSpaceInfo::PureCMYK,
-        ColorSpaceKind::PureRGB => ColorSpaceInfo::PureRGB,
-        ColorSpaceKind::Mixed => ColorSpaceInfo::Mixed,
-        ColorSpaceKind::Unknown => ColorSpaceInfo::Unknown,
+    let color_space = match rustybara::PdfPipeline::detect_color_space(pipeline.doc()) {
+        rustybara::color::icc::ColorSpaceKind::PureCMYK => ColorSpaceInfo::PureCMYK,
+        rustybara::color::icc::ColorSpaceKind::PureRGB => ColorSpaceInfo::PureRGB,
+        rustybara::color::icc::ColorSpaceKind::Mixed => ColorSpaceInfo::Mixed,
+        rustybara::color::icc::ColorSpaceKind::Unknown => ColorSpaceInfo::Unknown,
     };
 
     let file_size_kb = std::fs::metadata(path).map(|m| m.len() / 1024).unwrap_or(0);
