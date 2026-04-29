@@ -1,9 +1,11 @@
-use crate::tui::app::App;
-use crate::tui::app::ColorSpaceInfo;
-use crate::tui::app::MenuAction;
+use crate::tui::app::{ActionLogEntry, LogStatus};
+use crate::tui::app::{App, ColorSpaceInfo, MenuAction};
+use chrono;
 use core::f64;
 use rustybara::pages::PageBoxes;
 use rustybara::PdfPipeline;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub fn output_path(
@@ -116,6 +118,20 @@ pub fn run_image(
     Ok(())
 }
 
+pub fn load_local_files(path: &Path) -> Result<Vec<PathBuf>, io::Error> {
+    let paths = fs::read_dir(path)?
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            if path.extension()? == "pdf" {
+                Some(Ok(path))
+            } else {
+                None
+            }
+        })
+        .collect::<Result<Vec<PathBuf>, io::Error>>()?;
+    Ok(paths)
+}
+
 pub fn load_metadata(path: &Path) -> rustybara::Result<crate::tui::app::PdfMetadata> {
     use crate::tui::app::PdfMetadata;
     use rustybara::PdfPipeline;
@@ -169,11 +185,16 @@ pub fn load_metadata(path: &Path) -> rustybara::Result<crate::tui::app::PdfMetad
     })
 }
 
-pub fn run_tui_action(app: &App) -> rustybara::Result<(String, Vec<PathBuf>)> {
+pub fn run_tui_action(app: &App) -> rustybara::Result<(String, Vec<PathBuf>, ActionLogEntry)> {
     let input: Vec<PathBuf> = app.file_paths.to_vec();
     let count = input.len();
     let overwrite = app.overwrite;
     let output_dir = &app.output_dir;
+    let mut action_entry = ActionLogEntry {
+        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+        action: String::new(),
+        status: LogStatus::Ok,
+    };
 
     match app.selected_action {
         MenuAction::TrimMarks => {
@@ -187,7 +208,8 @@ pub fn run_tui_action(app: &App) -> rustybara::Result<(String, Vec<PathBuf>)> {
                 PdfPipeline::open(path)?.trim()?.save_pdf(&out)?;
                 out_paths.push(out);
             }
-            Ok((format!("Trimmed {count} file(s)"), out_paths))
+            action_entry.action = "TrimMarks".to_string();
+            Ok((format!("Trimmed {count} file(s)"), out_paths, action_entry))
         }
         MenuAction::ResizeToBleed => {
             let mut out_paths = Vec::new();
@@ -202,12 +224,12 @@ pub fn run_tui_action(app: &App) -> rustybara::Result<(String, Vec<PathBuf>)> {
                     .save_pdf(&out)?;
                 out_paths.push(out);
             }
+            action_entry.action = format!("ResizeToBleed ({})", app.params.bleed_pts);
+            let bleed_inch = app.params.bleed_pts / 72.0;
             Ok((
-                format!(
-                    "Resized {count} file(s) (bleed: {}pt)",
-                    app.params.bleed_pts
-                ),
+                format!("Resized {count} file(s) (bleed: {}inch)", bleed_inch),
                 out_paths,
+                action_entry,
             ))
         }
         MenuAction::ExportImages => {
@@ -241,12 +263,14 @@ pub fn run_tui_action(app: &App) -> rustybara::Result<(String, Vec<PathBuf>)> {
                     total += 1;
                 }
             }
+            action_entry.action = format!("ExportImages ({})", app.params.export_format);
             Ok((
                 format!(
                     "Exported {total} image(s) ({}, {}dpi)",
                     app.params.export_format, app.params.export_dpi
                 ),
                 Vec::new(),
+                action_entry,
             ))
         }
         MenuAction::RemapColors => {
@@ -266,9 +290,17 @@ pub fn run_tui_action(app: &App) -> rustybara::Result<(String, Vec<PathBuf>)> {
                     .save_pdf(&out)?;
                 out_paths.push(out);
             }
-            Ok((format!("Remapped {count} file(s)"), out_paths))
+            action_entry.action = "RemapColors".to_string();
+            Ok((format!("Remapped {count} file(s)"), out_paths, action_entry))
         }
-        MenuAction::PreviewPage => Ok(("Preview not yet implemented".into(), Vec::new())),
-        _ => Ok(("Unknown action".into(), Vec::new())),
+        MenuAction::PreviewPage => {
+            action_entry.action = "PreviewPage".to_string();
+            Ok((
+                "Preview not yet implemented".into(),
+                Vec::new(),
+                action_entry,
+            ))
+        }
+        _ => Ok(("Unknown action".into(), Vec::new(), action_entry)),
     }
 }

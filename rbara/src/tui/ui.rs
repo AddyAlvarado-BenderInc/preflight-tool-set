@@ -52,8 +52,8 @@ fn draw_main(frame: &mut Frame, app: &App) {
     let columns = Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(outer[1]);
 
-    let right_halves = Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)])
-        .split(columns[1]);
+    let right_halves =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(12)]).split(columns[1]);
 
     let right_bottom =
         Layout::vertical([Constraint::Min(0), Constraint::Length(5)]).split(right_halves[1]);
@@ -167,10 +167,18 @@ fn draw_inspection_table(frame: &mut Frame, app: &App, area: Rect) {
             Row::new(vec!["TrimBox".to_string(), fmt_box(m.trimbox)]).style(filled),
             Row::new(vec!["MediaBox".to_string(), fmt_box(Some(m.mediabox))]).style(plain),
             Row::new(vec!["BleedBox".to_string(), fmt_box(m.bleedbox)]).style(filled),
-            Row::new(vec!["Bleed".to_string(), format!("{:.3} in", m.bleed_pts / 72.0)]).style(plain),
+            Row::new(vec![
+                "Bleed".to_string(),
+                format!("{:.3} in", m.bleed_pts / 72.0),
+            ])
+            .style(plain),
             Row::new(vec!["Color".to_string(), color_label.to_string()]).style(filled),
             Row::new(vec!["Pages".to_string(), m.page_count.to_string()]).style(plain),
-            Row::new(vec!["File Size".to_string(), format!("{} KB", m.file_size_kb)]).style(filled),
+            Row::new(vec![
+                "File Size".to_string(),
+                format!("{} KB", m.file_size_kb),
+            ])
+            .style(filled),
             Row::new(vec!["Editing".to_string(), m.editing.clone()]).style(plain),
         ]
     } else {
@@ -199,30 +207,32 @@ fn draw_action_log(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let text = if lines.is_empty() {
-        format!("{}", app.idle_quip.to_string())
+    let (content, style) = if lines.is_empty() {
+        (app.idle_quip.clone(), Style::default().fg(Color::DarkGray))
     } else {
-        lines.join("\n")
+        (
+            lines.join("\n"),
+            Style::default().fg(AppColor::PrimaryOrange.into()),
+        )
     };
 
-    let log = Paragraph::new(text)
-        .style(Style::default().fg(Color::DarkGray))
-        .block(
-            Block::default()
-                .borders(Borders::TOP)
-                .title(" Last Actions "),
-        );
+    let log = Paragraph::new(content).style(style).block(
+        Block::default()
+            .borders(Borders::TOP)
+            .title(" Last Actions "),
+    );
     frame.render_widget(log, area);
 }
 fn draw_file_select(frame: &mut Frame, app: &App) {
     let chunks = Layout::vertical([
+        Constraint::Length(3),
         Constraint::Length(3),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
     .split(frame.area());
 
-    let title = Paragraph::new(" Enter file path")
+    let title = Paragraph::new(" Enter file path (leave \"Path\" empty to select a local PDF)")
         .style(Style::default().fg(AppColor::PrimaryOrange.into()).bold())
         .block(Block::default().borders(Borders::BOTTOM));
     frame.render_widget(title, chunks[0]);
@@ -231,14 +241,48 @@ fn draw_file_select(frame: &mut Frame, app: &App) {
         .block(Block::default().padding(Padding::top(1)));
     frame.render_widget(input, chunks[1]);
 
-    let hint_text = if app.file_paths.is_empty() {
+    let orange: Color = AppColor::PrimaryOrange.into();
+    let local_items: Vec<ListItem> = if app.local_files.is_empty() {
+        vec![ListItem::new(" No PDFs found in current directory")
+            .style(Style::default().fg(Color::DarkGray))]
+    } else {
+        app.local_files
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                let style = if i == app.local_file_index {
+                    Style::default().fg(Color::Black).bg(orange).bold()
+                } else {
+                    Style::default()
+                };
+                ListItem::new(format!(" {name}")).style(style)
+            })
+            .collect()
+    };
+    let local_list = List::new(local_items).block(
+        Block::default()
+            .borders(Borders::TOP)
+            .title(" Local PDFs  [Tab] load all as batch ")
+            .title_style(Style::default().fg(orange)),
+    );
+    frame.render_widget(local_list, chunks[2]);
+
+    let hint_text = if app.input_buffer.is_empty() {
+        if app.file_paths.is_empty() {
+            " ↑/↓ select • Enter to confirm • Tab load all • Esc to quit"
+        } else {
+            " ↑/↓ select • Enter to confirm • Tab load all • Esc to go back"
+        }
+    } else if app.file_paths.is_empty() {
         " Enter to confirm • Esc to quit"
     } else {
         " Enter to confirm • Esc to go back"
     };
     let hint = Paragraph::new(hint_text).style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(hint, chunks[2]);
+    frame.render_widget(hint, chunks[3]);
 }
+
 fn draw_output_input(frame: &mut Frame, app: &App) {
     use crate::tui::app::OutputChoice;
 

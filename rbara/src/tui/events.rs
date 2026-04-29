@@ -1,4 +1,4 @@
-use crate::tui::app::{MenuAction, OutputChoice};
+use crate::tui::app::{ActionLogEntry, LogStatus, MenuAction, OutputChoice};
 use crate::tui::{App, Screen};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use std::io;
@@ -6,6 +6,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub fn handle_events(app: &mut App) -> io::Result<()> {
+    let mut action_entry = ActionLogEntry {
+        timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+        action: String::new(),
+        status: LogStatus::Ok,
+    };
+
     if !event::poll(Duration::from_millis(50))? {
         return Ok(());
     }
@@ -44,6 +50,38 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                 _ => {}
             },
             Screen::FileSelect => match key.code {
+                KeyCode::Up => app.local_file_up(),
+                KeyCode::Down => app.local_file_down(),
+                KeyCode::Tab => {
+                   let local_dir = &std::env::current_dir().unwrap_or_default();
+                   let path = PathBuf::from(&local_dir);
+                   if path.is_dir() {
+                       app.file_paths = std::fs::read_dir(&path)?
+                           .filter_map(|e| e.ok())
+                           .map(|e| e.path())
+                           .filter(|p| {
+                               p.extension()
+                                   .and_then(|e| e.to_str())
+                                   .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+                           })
+                            .collect();
+                        if app.file_paths.is_empty() {
+                            app.status_message = Some("No PDF files found in directory".to_string());
+                        } else {
+                            let count = app.file_paths.len();
+                            app.status_message = Some(format!("{count} file(s) loaded"));
+                            app.input_buffer.clear();
+                            app.navigate(Screen::Main);
+                            if let Some(Ok(meta)) = app.file_paths
+                                .first()
+                                .map(|p| crate::process::load_metadata(p)) {
+                                app.pdf_metadata = Some(meta);
+                            }
+                        }    
+                    } else {
+                        app.status_message = Some("No PDFs found in local directory".into());
+                    }
+                }
                 KeyCode::Esc => {
                     if app.file_paths.is_empty() {
                         app.quit();
@@ -52,7 +90,9 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                     }
                 }
                 KeyCode::Enter => {
-                    if !app.input_buffer.is_empty() {
+                    if app.input_buffer.is_empty() {
+                        app.select_local_file();
+                    } else {
                         let trimmed = app.input_buffer.trim().trim_matches('"');
                         let unescaped = trimmed.replace("\\ ", " ");
                         let path = PathBuf::from(&unescaped);
@@ -67,17 +107,16 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                                 })
                                 .collect();
                             if app.file_paths.is_empty() {
-                                app.status_message =
-                                    Some(format!("No PDF files found in directory").to_string());
+                                app.status_message = Some("No PDF files found in directory".to_string());
                             } else {
                                 let count = app.file_paths.len();
                                 app.status_message = Some(format!("{count} file(s) loaded"));
                                 app.input_buffer.clear();
                                 app.navigate(Screen::Main);
-                                if let Some(path) = app.file_paths.first() {
-                                    if let Ok(meta) = crate::process::load_metadata(path) {
-                                        app.pdf_metadata = Some(meta);
-                                    }
+                                if let Some(Ok(meta)) = app.file_paths
+                                    .first()
+                                    .map(|p| crate::process::load_metadata(p)) {
+                                    app.pdf_metadata = Some(meta);
                                 }
                             }
                         } else if !path.exists() {
@@ -92,10 +131,10 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                             app.status_message = Some("1 file(s) loaded".into());
                             app.input_buffer.clear();
                             app.navigate(Screen::Main);
-                            if let Some(path) = app.file_paths.first() {
-                                if let Ok(meta) = crate::process::load_metadata(path) {
-                                    app.pdf_metadata = Some(meta);
-                                }
+                            if let Some(Ok(meta)) = app.file_paths
+                                .first()
+                                .map(|p| crate::process::load_metadata(p)) {
+                                app.pdf_metadata = Some(meta);
                             }
                         } else {
                             app.status_message = Some("Not a PDF file".into());
@@ -120,6 +159,8 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                         OutputChoice::Same => {
                             app.output_dir = None;
                             app.status_message = Some("Output: same location".into());
+                            action_entry.action = "OutputSelect (SAME)".to_string();
+                            app.action_log.push(action_entry);
                         }
                         OutputChoice::New => {
                             let trimmed = app.input_buffer.trim().trim_matches('"');
@@ -127,6 +168,8 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                             if path.is_dir() {
                                 app.status_message = Some(format!("Output: {}", path.display()));
                                 app.output_dir = Some(path);
+                                action_entry.action = "OutputSelect (NEW)".to_string();
+                                app.action_log.push(action_entry);
                             } else {
                                 app.status_message =
                                     Some(format!("{} is not a directory", path.display()));
@@ -194,10 +237,9 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                                     app.params.remap_to = [vals[0], vals[1], vals[2], vals[3]];
                                 }
                             }
-                            if let Some(tol_str) = parts.get(2) {
-                                if let Ok(val) = tol_str.trim().parse::<f64>() {
+                            if let Some(Ok(val)) = parts.get(2)
+                                .map(|v| v.trim().parse::<f64>()){
                                     app.params.remap_tolerance = val;
-                                }
                             }
                         }
                         MenuAction::PreviewPage => {}
@@ -225,4 +267,5 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
     }
 
     Ok(())
+
 }

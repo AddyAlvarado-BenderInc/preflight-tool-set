@@ -192,6 +192,8 @@ pub struct App {
     pub action_log: Vec<ActionLogEntry>,
     pub preview_page: usize,
     pub idle_quip: String,
+    pub local_file_index: usize,
+    pub local_files: Vec<PathBuf>,
 }
 
 impl Default for App {
@@ -221,25 +223,30 @@ impl App {
             action_log: Vec::new(),
             preview_page: 0,
             idle_quip: crate::tui::quips::random_quip(),
+            local_file_index: 0,
+            local_files: crate::process::load_local_files(
+                &std::env::current_dir().unwrap_or_default(),
+            )
+            .unwrap_or_default(),
         }
     }
+
     pub fn tick(&mut self) {
         // TODO: Just a placeholder for future periodic updates (spinner, etc.)
     }
+
     pub fn quit(&mut self) {
         self.running = false;
     }
+
     pub fn navigate(&mut self, screen: Screen) {
         self.screen = screen;
     }
+
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
     }
-    pub fn menu_up(&mut self) {
-        if self.menu_index > 0 {
-            self.menu_index -= 1;
-        }
-    }
+
     pub fn ascii_icon_state(&self) -> SingleAsciiIconState {
         if matches!(self.screen, Screen::Processing) {
             return SingleAsciiIconState::Loading;
@@ -254,17 +261,60 @@ impl App {
             },
         }
     }
+
+    pub fn local_file_up(&mut self) {
+        if self.local_file_index > 0 {
+            self.local_file_index -= 1;
+        }
+    }
+
+    pub fn local_file_down(&mut self) {
+        if self.local_file_index + 1 < self.local_files.len() {
+            self.local_file_index += 1;
+        }
+    }
+
+    pub fn select_local_file(&mut self) {
+        if let Some(path) = self.local_files.get(self.local_file_index).cloned() {
+            self.file_paths = vec![path.clone()];
+            if let Ok(meta) = crate::process::load_metadata(&path) {
+                self.pdf_metadata = Some(meta);
+            }
+            self.navigate(Screen::Main);
+        }
+    }
+
+    pub fn menu_up(&mut self) {
+        if self.menu_index > 0 {
+            self.menu_index -= 1;
+        }
+    }
+
     pub fn menu_down(&mut self) {
         if self.menu_index + 1 < MenuAction::ALL.len() {
             self.menu_index += 1;
         }
     }
+
     pub fn select_menu_item(&mut self) {
         let action = MenuAction::ALL[self.menu_index];
+        let mut action_entry = self::ActionLogEntry {
+            timestamp: chrono::Local::now().format("%h:%m:%s").to_string(),
+            action: String::new(),
+            status: LogStatus::Ok,
+        };
         self.selected_action = action;
 
         match action {
-            MenuAction::ToggleOverwrite => self.overwrite = !self.overwrite,
+            MenuAction::ToggleOverwrite => {
+                self.overwrite = !self.overwrite;
+                if self.overwrite {
+                    action_entry.action = "ToggleOverwrite (TRUE)".to_string();
+                } else {
+                    action_entry.action = "ToggleOverwrite (FALSE)".to_string();
+                }
+                self.action_log.push(action_entry);
+            }
             MenuAction::OutputPath => {
                 self.input_buffer = self
                     .output_dir
@@ -330,9 +380,10 @@ impl App {
         }
 
         match run_tui_action(self) {
-            Ok((msg, new_paths)) => {
+            Ok((msg, new_paths, entry)) => {
                 self.result_message = msg;
                 self.last_result_ok = true;
+                self.action_log.push(entry);
                 if !new_paths.is_empty() {
                     self.file_paths = new_paths;
                 }
