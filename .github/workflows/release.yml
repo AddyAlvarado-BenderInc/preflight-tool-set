@@ -110,7 +110,10 @@ jobs:
             runner: macos-14   # Apple silicon
             target: aarch64-apple-darwin
           - arch: x86_64
-            runner: macos-13   # Intel
+            # Cross-compile Intel from Apple silicon: macos-13 (Intel) runners
+            # are deprecated and frequently queue-starved. pdfium ships a
+            # prebuilt mac-x64 dylib, so no native Intel host is required.
+            runner: macos-14
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.runner }}
     steps:
