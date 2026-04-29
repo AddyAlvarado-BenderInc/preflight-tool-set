@@ -200,7 +200,7 @@ pub fn handle_events(app: &mut App) -> io::Result<()> {
                     match app.selected_action {
                         MenuAction::ResizeToBleed => {
                             if let Ok(val) = trimmed.parse::<f64>() {
-                                app.params.bleed_pts = val;
+                                app.params.bleed_pts = val * 72.0;
                             }
                         }
                         MenuAction::ExportImages => {

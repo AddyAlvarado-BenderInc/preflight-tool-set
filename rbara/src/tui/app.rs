@@ -330,7 +330,7 @@ impl App {
             MenuAction::Quit => self.quit(),
             a if a.needs_params() => {
                 self.input_buffer = match a {
-                    MenuAction::ResizeToBleed => self.params.bleed_pts.to_string(),
+                    MenuAction::ResizeToBleed => format!("{:.4}", self.params.bleed_pts / 72.0),
                     MenuAction::ExportImages => {
                         format!("{},{}", self.params.export_format, self.params.export_dpi,)
                     }

@@ -353,7 +353,7 @@ fn draw_param_input(frame: &mut Frame, app: &App) {
     .split(frame.area());
 
     let prompt = match app.selected_action {
-        MenuAction::ResizeToBleed => " Bleed size (points)",
+        MenuAction::ResizeToBleed => " Bleed size (inches)",
         MenuAction::ExportImages => " Export settings (format,dpi)",
         MenuAction::RemapColors => " Remap colors (C M Y K)",
         _ => " Parameters",
@@ -363,7 +363,7 @@ fn draw_param_input(frame: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::BOTTOM));
     frame.render_widget(title, chunks[0]);
     let hint_label = match app.selected_action {
-        MenuAction::ResizeToBleed => " e.g. 9.0",
+        MenuAction::ResizeToBleed => " e.g. 0.125  (1/8 inch standard bleed)",
         MenuAction::ExportImages => " e.g. jpg,150 | formats: jpg, png, webp, tiff",
         MenuAction::RemapColors => {
             " e.g. 1.0 1.0 1.0 1.0,0.6 0.4 0.2 1.0,1 | CMYK → CMYK (tolerance)"

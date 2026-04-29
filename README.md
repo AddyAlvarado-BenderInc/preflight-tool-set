@@ -41,6 +41,68 @@ GPU-accelerated PDF page viewer (`rbv`).
 
 ---
 
+## Installation
+
+Pre-built installers for `rbara` (the CLI/TUI binary) are published with each
+release. Each installer bundles its own `pdfium` runtime — no system pdfium
+needed.
+
+### Windows
+
+Download `rbara-setup-<version>-x64.exe` from the
+[Releases page](https://github.com/Addy-A/rustybara/releases) and run it.
+This is a per-user Inno Setup installer (no admin required) that installs to
+`%LOCALAPPDATA%\Programs\rbara\`, registers an opt-in PATH entry, and adds
+an Add/Remove Programs entry. SmartScreen may warn the first time — the
+binary is currently unsigned.
+
+### macOS
+
+```sh
+# Apple silicon
+tar -xzf rbara-<version>-macos-arm64.tar.gz && cd rbara-<version>-macos-arm64
+./install.sh        # installs to ~/.local
+
+# Intel
+tar -xzf rbara-<version>-macos-x86_64.tar.gz && cd rbara-<version>-macos-x86_64
+./install.sh
+```
+
+The bundle is unsigned; `install.sh` strips the `com.apple.quarantine`
+attribute automatically. To uninstall: `./uninstall.sh`.
+
+### Linux (glibc x86_64)
+
+```sh
+tar -xzf rbara-<version>-linux-x64.tar.gz && cd rbara-<version>-linux-x64
+./install.sh                       # ~/.local
+sudo PREFIX=/usr/local ./install.sh   # system-wide
+```
+
+Tested on Ubuntu 22.04+, Debian 12+, Fedora 38+, RHEL 9+, Arch, openSUSE
+Tumbleweed. Musl distros (Alpine) need a source build. To uninstall:
+`./uninstall.sh`.
+
+### Docker
+
+```sh
+docker pull ghcr.io/Addy-A/rbara:latest
+
+# CLI usage — bind-mount your working directory
+docker run --rm -v "$PWD:/work" ghcr.io/Addy-A/rbara:latest \
+  trim /work/in.pdf -o /work/out.pdf
+```
+
+The image is ~175 MB (debian:bookworm-slim base) and runs as a non-root user.
+
+### Building from source
+
+See the [Contributing](#contributing) section. The maintainer-side installer
+scripts live in [`installer/`](installer/) (one subdir per platform, each
+with its own README).
+
+---
+
 ## Quick Start
 
 ### As a library
@@ -196,7 +258,12 @@ at runtime. Place the appropriate binary alongside your executable:
 | macOS | `libpdfium.dylib` |
 | Linux | `libpdfium.so` |
 
-Pre-built binaries: [pdfium-binaries](https://github.com/nicokoenig/pdfium-binaries)
+Pre-built binaries: [pdfium-binaries](https://github.com/bblanchon/pdfium-binaries)
+
+> **Note:** End-users of the `rbara` binary do **not** need to do this manually
+> — the [pre-built installers](#installation) bundle the matching pdfium for
+> each platform. This requirement applies only when consuming `rustybara` as a
+> library in your own Rust project.
 
 Operations that do not rasterize (`trim`, `resize`, `save_pdf`, `page_count`,
 `PageBoxes::read`) work without PDFium.
@@ -267,12 +334,13 @@ rbv <file_path> <page_index> [--dpi <n>]
 
 - [x] ICC color management (`color` module via `lcms2`) — v0.1.2
 - [x] CMYK→CMYK color remapping in content streams — v0.1.2
+- [x] Cross-platform installers (Windows / macOS / Linux / Docker) with bundled pdfium — v0.1.3
+- [x] GitHub Actions release pipeline (one tag → all installers + GHCR image) — v0.1.3
 - [ ] RGB→CMYK conversion (vector graphics + embedded images)
 - [ ] Spot color detection service
 - [ ] `rbv` GPU-accelerated page viewer
 - [ ] PDF/X validation and preflight reports
 - [ ] Configurable JPEG quality (`--quality` flag)
-- [ ] `cargo-dist` release pipeline (Linux, Windows, macOS including Apple Silicon)
 
 ---
 
@@ -288,6 +356,26 @@ cargo test --workspace
 - Public API additions require documentation and at least one integration test.
 - The app-style keyboard model is the UX baseline for `rbara`. Modal bindings
   are opt-in aliases only.
+
+### Cutting a release
+
+Releases are fully automated by [`.github/workflows/release.yml`](.github/workflows/release.yml).
+To cut a new version:
+
+1. Bump `version` in `rbara/Cargo.toml` (and `rustybara/Cargo.toml` if the lib changed).
+2. Commit and push.
+3. Tag and push the tag:
+   ```sh
+   git tag v0.1.4
+   git push --tags
+   ```
+4. The workflow will build the Windows installer, the Linux tarball, both
+   macOS tarballs (Apple silicon + Intel), and the Docker image, then create
+   a GitHub Release with all artifacts and a `SHA256SUMS.txt` attached.
+
+The pdfium chromium build is pinned via `PDFIUM_CHROMIUM` env var in the
+workflow (currently `7776`). Bump it there to refresh pdfium across all
+artifacts in lockstep.
 
 ---
 

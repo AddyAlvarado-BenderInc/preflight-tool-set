@@ -1,0 +1,17 @@
+# Build outputs
+windows/build/
+windows/dist/
+windows/assets/pdfium.dll
+windows/assets/pdfium.tgz
+
+linux/build/
+linux/dist/
+linux/payload/
+linux/assets/libpdfium.so
+linux/assets/pdfium.tgz
+
+macos/build/
+macos/dist/
+macos/payload/
+macos/assets/
+

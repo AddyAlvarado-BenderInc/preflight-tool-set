@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1.7
+# .dockerignore — keep the build context lean.
+
+# Rust build artifacts
+target/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Installer build outputs (not needed for the Docker image)
+installer/windows/build/
+installer/windows/dist/
+installer/windows/assets/pdfium.dll
+installer/windows/assets/pdfium.tgz
+installer/linux/build/
+installer/linux/dist/
+installer/linux/payload/
+installer/linux/assets/
+installer/macos/build/
+installer/macos/dist/
+installer/macos/payload/
+installer/macos/assets/
+
+# Test fixtures (43 MB of PDFs, not needed for `cargo build`)
+rustybara/tests/fixtures/
+
+# Git internals
+.git/
+.gitattributes
+.github/
+
+# Secrets (defense in depth — never put these in images)
+.env
+.env.*
+*.pem
+*.key

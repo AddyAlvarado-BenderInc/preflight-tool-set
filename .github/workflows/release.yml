@@ -1,0 +1,234 @@
+name: release
+
+# Cuts a GitHub Release with all rbara artifacts when a tag matching
+# v* is pushed (e.g., `git tag v0.1.3 && git push --tags`).
+#
+# Artifacts produced (one tag → one Release):
+#   rbara-setup-<version>-x64.exe                    (Windows, Inno Setup)
+#   rbara-<version>-linux-x64.tar.gz                 (Linux glibc, x86_64)
+#   rbara-<version>-macos-arm64.tar.gz               (macOS Apple silicon)
+#   rbara-<version>-macos-x86_64.tar.gz              (macOS Intel)
+#   rbara:<version> + rbara:latest                   (GHCR Docker image)
+#
+# Each artifact bundles its own pdfium (chromium/7776) — no system pdfium needed.
+# All four installers are independent and can run/release in parallel.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to release (e.g. v0.1.3). Must already exist."
+        required: true
+        type: string
+
+permissions:
+  contents: write   # create the release + upload assets
+  packages: write   # push the Docker image to ghcr.io
+
+env:
+  PDFIUM_CHROMIUM: "7776"
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Windows installer (Inno Setup .exe)
+  # -------------------------------------------------------------------------
+  build-windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable, MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+        shell: pwsh
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          .\installer\windows\build-installer.ps1 -PdfiumChromium $env:PDFIUM_CHROMIUM
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: installer/windows/dist/*.exe
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # Linux tarball (.tar.gz, x86_64-unknown-linux-gnu)
+  # -------------------------------------------------------------------------
+  build-linux:
+    name: Linux tarball
+    # Use ubuntu-22.04 (glibc 2.35) so the binary runs on any distro from
+    # ~2022 onward (Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora 38+).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            liblcms2-dev pkg-config curl tar bc
+
+      - name: Build installer
+        run: |
+          chmod +x installer/linux/build-installer.sh \
+                   installer/linux/install.sh \
+                   installer/linux/uninstall.sh
+          ./installer/linux/build-installer.sh --pdfium-chromium "$PDFIUM_CHROMIUM"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-tarball
+          path: installer/linux/dist/*.tar.gz
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # macOS tarballs (Apple silicon + Intel)
+  # -------------------------------------------------------------------------
+  build-macos:
+    name: macOS tarball (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14   # Apple silicon
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            runner: macos-13   # Intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable, ${{ matrix.target }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build installer
+        run: |
+          chmod +x installer/macos/build-installer.sh \
+                   installer/macos/install.sh \
+                   installer/macos/uninstall.sh
+          ./installer/macos/build-installer.sh \
+            --arch "${{ matrix.arch }}" \
+            --pdfium-chromium "$PDFIUM_CHROMIUM"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-tarball-${{ matrix.arch }}
+          path: installer/macos/dist/*.tar.gz
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------------
+  # Docker image → GitHub Container Registry
+  # -------------------------------------------------------------------------
+  build-docker:
+    name: Docker image (ghcr.io)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            PDFIUM_CHROMIUM=${{ env.PDFIUM_CHROMIUM }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/rbara:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/rbara:latest
+
+  # -------------------------------------------------------------------------
+  # Publish: gather every artifact and attach to a GitHub Release
+  # -------------------------------------------------------------------------
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-linux, build-macos, build-docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p release-files
+          find dist -type f \( -name '*.exe' -o -name '*.tar.gz' \) -exec cp {} release-files/ \;
+          ls -lh release-files
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd release-files
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: rbara ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            release-files/*
+          body: |
+            ## rbara ${{ steps.tag.outputs.tag }}
+
+            Pre-built installers for Windows, Linux, and macOS — each bundles
+            pdfium (chromium/${{ env.PDFIUM_CHROMIUM }}) and is fully self-contained.
+
+            ### Install
+
+            | Platform | Asset |
+            |---|---|
+            | Windows | `rbara-setup-*-x64.exe` (Inno Setup, per-user) |
+            | Linux (glibc x86_64) | `rbara-*-linux-x64.tar.gz` |
+            | macOS (Apple silicon) | `rbara-*-macos-arm64.tar.gz` |
+            | macOS (Intel) | `rbara-*-macos-x86_64.tar.gz` |
+            | Docker | `ghcr.io/${{ github.repository_owner }}/rbara:${{ steps.tag.outputs.tag }}` |
+
+            See `SHA256SUMS.txt` for checksums.
+
+            See the [README](https://github.com/${{ github.repository }}#installation)
+            for per-platform install instructions and uninstallers.
