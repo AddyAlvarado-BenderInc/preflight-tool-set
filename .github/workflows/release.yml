@@ -145,6 +145,12 @@ jobs:
   build-docker:
     name: Docker image (ghcr.io)
     runs-on: ubuntu-latest
+    # Suppress the auto-uploaded "*.dockerbuild" build-record artifact from
+    # docker/build-push-action — its name contains '~' which breaks
+    # actions/download-artifact path handling in publish-release.
+    env:
+      DOCKER_BUILD_SUMMARY: "false"
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -194,6 +200,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+          # Only our explicit installer artifacts. docker/build-push-action
+          # auto-uploads a "*.dockerbuild" build-record artifact whose name
+          # contains '~' and breaks download paths — skip it.
+          pattern: "{windows-installer,linux-tarball,macos-tarball-*}"
 
       - name: Flatten artifact tree
         run: |
